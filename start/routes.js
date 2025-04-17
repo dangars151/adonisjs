@@ -17,5 +17,6 @@
 const Route = use('Route')
 
 Route.on('/').render('welcome')
-Route.get('/users', 'UserController.index')
+Route.get('/users', 'UserController.index').middleware(['jwtAuth'])
 Route.post('/signup', 'AuthController.signup')
+Route.post('/signin', 'AuthController.signin')
