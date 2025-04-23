@@ -1,6 +1,17 @@
 'use strict'
 
 const Redis = use('Redis')
+const { Mutex } = require('async-mutex')
+
+const auctionMutexes = new Map()
+
+function getAuctionMutex(auctionId) {
+    if (!auctionMutexes.has(auctionId)) {
+      auctionMutexes.set(auctionId, new Mutex())
+    }
+    return auctionMutexes.get(auctionId)
+}
+
 
 class AuctionController {
     async bid({ request, response }) {
@@ -32,6 +43,40 @@ class AuctionController {
             return response.status(500).json({ message: 'Something went wrong. Please try again later.' })
         }
     }
+
+    async bid_with_mutex({ request, response }) {
+        const { auction_id, new_bid } = request.only(['auction_id', 'new_bid'])
+
+        const key = `auction:${auction_id}`
+
+        const mutex = getAuctionMutex(key)
+
+        try {
+            const result = await mutex.runExclusive(async () => {
+                const [current_bid_raw, step_price_raw] = await Redis.hmget(key, 'current_bid', 'step_price')
+                const current_bid = Number(current_bid_raw)
+                const step_price = Number(step_price_raw)
+
+                if (new_bid >= current_bid + step_price) {
+                    await Redis.hset(key, 'current_bid', new_bid)
+                    return 1
+                } 
+
+                return 0
+            })
+
+
+            if (result === 1) {
+                return response.status(200).json({ message: 'Auction successful!' })
+            }
+
+            return response.status(200).json({ message: 'Auction failed!' })
+        } catch (error) {
+            console.error('AuctionController.bid error: ', error.message)
+            return response.status(500).json({ message: 'Something went wrong. Please try again later.' })
+        }
+    }
+
 
     async get_info({ request, response }) {
         try {
